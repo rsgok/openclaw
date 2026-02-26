@@ -16,10 +16,15 @@ import {
   resolveAgentOutboundTarget,
 } from "../../infra/outbound/agent-delivery.js";
 import { resolveMessageChannelSelection } from "../../infra/outbound/channel-selection.js";
-import { classifySessionKeyShape, normalizeAgentId } from "../../routing/session-key.js";
+import {
+  classifySessionKeyShape,
+  normalizeAgentId,
+  parseAgentSessionKey,
+} from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeInputProvenance, type InputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
+import { isSubagentSessionKey } from "../../sessions/session-key-utils.js";
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import {
   INTERNAL_MESSAGE_CHANNEL,
@@ -613,11 +618,25 @@ export const agentHandlers: GatewayRequestHandlers = {
       context.deps,
     )
       .then((result) => {
+        // Task-based Multi-Agent: build _meta for output attribution
+        const parsedSession = parseAgentSessionKey(resolvedSessionKey);
+        const agentType = isSubagentSessionKey(resolvedSessionKey) ? "subagent" : "main";
+        const sessionOrigin = sessionEntry?.origin;
+        const meta = {
+          sessionKey: resolvedSessionKey,
+          agentId: parsedSession?.agentId ?? agentId,
+          agentType,
+          agentRole: sessionOrigin?.agentRole,
+          taskId: sessionOrigin?.taskId,
+          parentSessionKey: sessionOrigin?.parentSessionKey,
+        };
+
         const payload = {
           runId,
           status: "ok" as const,
           summary: "completed",
           result,
+          _meta: meta,
         };
         context.dedupe.set(`agent:${idem}`, {
           ts: Date.now(),

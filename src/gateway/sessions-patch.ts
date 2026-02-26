@@ -359,6 +359,79 @@ export async function applySessionsPatchToStore(params: {
     }
   }
 
+  // Task-based Multi-Agent: handle origin fields
+  if ("taskId" in patch) {
+    const raw = patch.taskId;
+    if (raw === null) {
+      if (existing?.origin?.taskId) {
+        next.origin = { ...next.origin, taskId: undefined };
+        if (Object.keys(next.origin || {}).length === 0) {
+          delete next.origin;
+        }
+      }
+    } else if (raw !== undefined) {
+      const trimmed = String(raw).trim();
+      if (!trimmed) {
+        return invalid("invalid taskId: empty");
+      }
+      next.origin = { ...next.origin, taskId: trimmed };
+    }
+  }
+
+  if ("agentRole" in patch) {
+    const raw = patch.agentRole;
+    if (raw === null) {
+      if (existing?.origin?.agentRole) {
+        next.origin = { ...next.origin, agentRole: undefined };
+        if (Object.keys(next.origin || {}).length === 0) {
+          delete next.origin;
+        }
+      }
+    } else if (raw !== undefined) {
+      const trimmed = String(raw).trim();
+      if (!trimmed) {
+        return invalid("invalid agentRole: empty");
+      }
+      next.origin = { ...next.origin, agentRole: trimmed };
+    }
+  }
+
+  if ("agentType" in patch) {
+    const raw = patch.agentType;
+    if (raw === null) {
+      if (existing?.origin?.agentType) {
+        next.origin = { ...next.origin, agentType: undefined };
+        if (Object.keys(next.origin || {}).length === 0) {
+          delete next.origin;
+        }
+      }
+    } else if (raw !== undefined) {
+      const normalized = String(raw).trim().toLowerCase();
+      if (normalized !== "main" && normalized !== "subagent") {
+        return invalid('invalid agentType (use "main"|"subagent")');
+      }
+      next.origin = { ...next.origin, agentType: normalized };
+    }
+  }
+
+  if ("parentSessionKey" in patch) {
+    const raw = patch.parentSessionKey;
+    if (raw === null) {
+      if (existing?.origin?.parentSessionKey) {
+        next.origin = { ...next.origin, parentSessionKey: undefined };
+        if (Object.keys(next.origin || {}).length === 0) {
+          delete next.origin;
+        }
+      }
+    } else if (raw !== undefined) {
+      const trimmed = String(raw).trim();
+      if (!trimmed) {
+        return invalid("invalid parentSessionKey: empty");
+      }
+      next.origin = { ...next.origin, parentSessionKey: trimmed };
+    }
+  }
+
   store[storeKey] = next;
   return { ok: true, entry: next };
 }

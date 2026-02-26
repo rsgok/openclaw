@@ -6,6 +6,7 @@ import { callGateway } from "../gateway/call.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
+import { downloadFromHttpUrl } from "../utils/http-download.js";
 import { resolveAgentConfig } from "./agent-scope.js";
 import { AGENT_LANE_SUBAGENT } from "./lanes.js";
 import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
@@ -33,6 +34,12 @@ export type SpawnSubagentParams = {
   mode?: SpawnSubagentMode;
   cleanup?: "delete" | "keep";
   expectsCompletionMessage?: boolean;
+  // Task-based Multi-Agent support
+  predefinedRole?: string;
+  bootstrapFiles?: Record<string, string>;
+  bootstrapFilesUrls?: Record<string, string>;
+  taskId?: string;
+  agentRole?: string;
 };
 
 export type SpawnSubagentContext = {
@@ -295,7 +302,15 @@ export async function spawnSubagentDirect(
   try {
     await callGateway({
       method: "sessions.patch",
-      params: { key: childSessionKey, spawnDepth: childDepth },
+      params: {
+        key: childSessionKey,
+        spawnDepth: childDepth,
+        // Task-based Multi-Agent: inject origin metadata
+        ...(params.taskId ? { taskId: params.taskId } : {}),
+        ...(params.agentRole ? { agentRole: params.agentRole } : {}),
+        agentType: "subagent",
+        parentSessionKey: requesterInternalKey,
+      },
       timeoutMs: 10_000,
     });
   } catch (err) {
@@ -379,6 +394,33 @@ export async function spawnSubagentDirect(
     }
     threadBindingReady = true;
   }
+
+  // Task-based Multi-Agent: resolve bootstrap files
+  let resolvedBootstrapFiles: Record<string, string> | undefined;
+  if (params.bootstrapFilesUrls && Object.keys(params.bootstrapFilesUrls).length > 0) {
+    const downloadResults: Record<string, string> = {};
+    const urls = params.bootstrapFilesUrls;
+    for (const [filename, url] of Object.entries(urls)) {
+      if (!url?.trim()) {
+        continue;
+      }
+      const result = await downloadFromHttpUrl(url, { timeoutMs: 30_000 });
+      if (!result.ok) {
+        return {
+          status: "error",
+          error: `Failed to download ${filename}: ${result.error}`,
+          childSessionKey,
+        };
+      }
+      downloadResults[filename] = result.content;
+    }
+    resolvedBootstrapFiles = { ...downloadResults };
+  }
+  // Inline bootstrap files take precedence over URL-downloaded files
+  if (params.bootstrapFiles && Object.keys(params.bootstrapFiles).length > 0) {
+    resolvedBootstrapFiles = { ...resolvedBootstrapFiles, ...params.bootstrapFiles };
+  }
+
   const childSystemPrompt = buildSubagentSystemPrompt({
     requesterSessionKey,
     requesterOrigin,
@@ -387,12 +429,17 @@ export async function spawnSubagentDirect(
     task,
     childDepth,
     maxSpawnDepth,
+    bootstrapFiles: resolvedBootstrapFiles,
+    taskId: params.taskId,
+    agentRole: params.agentRole,
   });
   const childTaskMessage = [
     `[Subagent Context] You are running as a subagent (depth ${childDepth}/${maxSpawnDepth}). Results auto-announce to your requester; do not busy-poll for status.`,
     spawnMode === "session"
       ? "[Subagent Context] This subagent session is persistent and remains available for thread follow-up messages."
       : undefined,
+    params.taskId ? `[Task ID]: ${params.taskId}` : undefined,
+    params.agentRole ? `[Agent Role]: ${params.agentRole}` : undefined,
     `[Subagent Task]: ${task}`,
   ]
     .filter((line): line is string => Boolean(line))

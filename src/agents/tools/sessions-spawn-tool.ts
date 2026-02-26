@@ -17,6 +17,24 @@ const SessionsSpawnToolSchema = Type.Object({
   thread: Type.Optional(Type.Boolean()),
   mode: optionalStringEnum(SUBAGENT_SPAWN_MODES),
   cleanup: optionalStringEnum(["delete", "keep"] as const),
+  // Task-based Multi-Agent support
+  predefinedRole: Type.Optional(Type.String()),
+  bootstrapFiles: Type.Optional(
+    Type.Object({
+      "AGENTS.md": Type.Optional(Type.String()),
+      "SOUL.md": Type.Optional(Type.String()),
+      "TOOLS.md": Type.Optional(Type.String()),
+    }),
+  ),
+  bootstrapFilesUrls: Type.Optional(
+    Type.Object({
+      "AGENTS.md": Type.Optional(Type.String()),
+      "SOUL.md": Type.Optional(Type.String()),
+      "TOOLS.md": Type.Optional(Type.String()),
+    }),
+  ),
+  taskId: Type.Optional(Type.String()),
+  agentRole: Type.Optional(Type.String()),
 });
 
 export function createSessionsSpawnTool(opts?: {
@@ -61,6 +79,13 @@ export function createSessionsSpawnTool(opts?: {
           : undefined;
       const thread = params.thread === true;
 
+      const predefinedRole =
+        typeof params.predefinedRole === "string" ? params.predefinedRole.trim() : undefined;
+      const taskId = typeof params.taskId === "string" ? params.taskId.trim() : undefined;
+      const agentRole = typeof params.agentRole === "string" ? params.agentRole.trim() : undefined;
+      const bootstrapFiles = params.bootstrapFiles as Record<string, string> | undefined;
+      const bootstrapFilesUrls = params.bootstrapFilesUrls as Record<string, string> | undefined;
+
       const result = await spawnSubagentDirect(
         {
           task,
@@ -73,6 +98,11 @@ export function createSessionsSpawnTool(opts?: {
           mode,
           cleanup,
           expectsCompletionMessage: true,
+          predefinedRole,
+          bootstrapFiles,
+          bootstrapFilesUrls,
+          taskId,
+          agentRole,
         },
         {
           agentSessionKey: opts?.agentSessionKey,

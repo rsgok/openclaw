@@ -20,6 +20,10 @@ export type SessionOrigin = {
   to?: string;
   accountId?: string;
   threadId?: string | number;
+  taskId?: string;
+  agentRole?: string;
+  agentType?: "main" | "subagent";
+  parentSessionKey?: string;
 };
 
 export type SessionEntry = {

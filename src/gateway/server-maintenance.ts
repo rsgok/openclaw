@@ -10,6 +10,7 @@ import {
 import type { DedupeEntry } from "./server-shared.js";
 import { formatError } from "./server-utils.js";
 import { setBroadcastHealthUpdate } from "./server/health-state.js";
+import { startTaskLifecycleScanner } from "./task-lifecycle.js";
 
 export function startGatewayMaintenanceTimers(params: {
   broadcast: (
@@ -128,6 +129,9 @@ export function startGatewayMaintenanceTimers(params: {
       params.chatDeltaSentAt.delete(runId);
     }
   }, 60_000);
+
+  // Start task lifecycle scanner for multi-agent task management
+  startTaskLifecycleScanner();
 
   return { tickInterval, healthInterval, dedupeCleanup };
 }

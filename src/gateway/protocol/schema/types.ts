@@ -257,3 +257,17 @@ export type ChatEvent = Static<typeof ChatEventSchema>;
 export type UpdateRunParams = Static<typeof UpdateRunParamsSchema>;
 export type TickEvent = Static<typeof TickEventSchema>;
 export type ShutdownEvent = Static<typeof ShutdownEventSchema>;
+import {
+  TaskCreateParamsSchema,
+  TaskCreateResultSchema,
+  TaskDestroyParamsSchema,
+  TaskDestroyResultSchema,
+  TaskSessionsParamsSchema,
+  TaskSessionsResultSchema,
+} from "./task.js";
+export type TaskCreateParams = Static<typeof TaskCreateParamsSchema>;
+export type TaskCreateResult = Static<typeof TaskCreateResultSchema>;
+export type TaskDestroyParams = Static<typeof TaskDestroyParamsSchema>;
+export type TaskDestroyResult = Static<typeof TaskDestroyResultSchema>;
+export type TaskSessionsParams = Static<typeof TaskSessionsParamsSchema>;
+export type TaskSessionsResult = Static<typeof TaskSessionsResultSchema>;

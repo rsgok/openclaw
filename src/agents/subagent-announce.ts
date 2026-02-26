@@ -983,6 +983,12 @@ export function buildSubagentSystemPrompt(params: {
   childDepth?: number;
   /** Config value: max allowed spawn depth. */
   maxSpawnDepth?: number;
+  /** Task-based Multi-Agent: bootstrap files to inject. */
+  bootstrapFiles?: Record<string, string>;
+  /** Task-based Multi-Agent: task identifier. */
+  taskId?: string;
+  /** Task-based Multi-Agent: agent role. */
+  agentRole?: string;
 }) {
   const taskText =
     typeof params.task === "string" && params.task.trim()
@@ -1059,9 +1065,22 @@ export function buildSubagentSystemPrompt(params: {
         ? `- Requester channel: ${params.requesterOrigin.channel}.`
         : undefined,
       `- Your session: ${params.childSessionKey}.`,
+      params.taskId ? `- Task ID: ${params.taskId}` : undefined,
+      params.agentRole ? `- Agent Role: ${params.agentRole}` : undefined,
     ].filter((line): line is string => line !== undefined),
     "",
   );
+
+  // Task-based Multi-Agent: inject bootstrap files content
+  if (params.bootstrapFiles && Object.keys(params.bootstrapFiles).length > 0) {
+    lines.push("## Bootstrap Files", "");
+    for (const [filename, content] of Object.entries(params.bootstrapFiles)) {
+      if (content?.trim()) {
+        lines.push(`### ${filename}`, "", content.trim(), "");
+      }
+    }
+  }
+
   return lines.join("\n");
 }
 

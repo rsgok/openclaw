@@ -78,6 +78,13 @@ export const SessionsPatchParamsSchema = Type.Object(
     groupActivation: Type.Optional(
       Type.Union([Type.Literal("mention"), Type.Literal("always"), Type.Null()]),
     ),
+    // Task-based Multi-Agent: origin fields for session metadata
+    taskId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+    agentRole: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+    agentType: Type.Optional(
+      Type.Union([Type.Literal("main"), Type.Literal("subagent"), Type.Null()]),
+    ),
+    parentSessionKey: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   },
   { additionalProperties: false },
 );
