@@ -116,6 +116,10 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "set-heartbeats",
     "system-event",
     "agents.files.set",
+    // Task-based Multi-Agent
+    "task.create",
+    "task.sessions",
+    "task.destroy",
   ],
 };
 

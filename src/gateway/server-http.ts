@@ -60,6 +60,11 @@ import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { GATEWAY_CLIENT_MODES, normalizeGatewayClientMode } from "./protocol/client-info.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
+import {
+  handleTaskCreateHttpRequest,
+  handleTaskDestroyHttpRequest,
+  handleTaskSessionsHttpRequest,
+} from "./task-http.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -535,6 +540,39 @@ export function createGatewayHttpServer(opts: {
           return;
         }
       }
+
+      // Task-based Multi-Agent HTTP API
+      if (
+        await handleTaskCreateHttpRequest(req, res, {
+          auth: resolvedAuth,
+          trustedProxies,
+          allowRealIpFallback,
+          rateLimiter,
+        })
+      ) {
+        return;
+      }
+      if (
+        await handleTaskSessionsHttpRequest(req, res, {
+          auth: resolvedAuth,
+          trustedProxies,
+          allowRealIpFallback,
+          rateLimiter,
+        })
+      ) {
+        return;
+      }
+      if (
+        await handleTaskDestroyHttpRequest(req, res, {
+          auth: resolvedAuth,
+          trustedProxies,
+          allowRealIpFallback,
+          rateLimiter,
+        })
+      ) {
+        return;
+      }
+
       if (canvasHost) {
         if (isCanvasPath(requestPath)) {
           const ok = await authorizeCanvasRequest({

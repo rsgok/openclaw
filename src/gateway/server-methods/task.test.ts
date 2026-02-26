@@ -2,6 +2,7 @@
  * Tests for task.create and task.destroy Gateway methods
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../agents/agent-scope.js", () => ({
@@ -42,9 +43,9 @@ vi.mock("../protocol/index.js", () => ({
   validateTaskDestroyParams: vi.fn(() => true),
 }));
 
-import { taskHandlers } from "./task.js";
-import type { TaskCreateParams, TaskDestroyParams } from "../protocol/index.js";
 import { callGateway } from "../call.js";
+import type { TaskCreateParams, TaskDestroyParams } from "../protocol/index.js";
+import { taskHandlers } from "./task.js";
 
 describe("task Gateway methods", () => {
   const mockRespond = vi.fn();
@@ -65,7 +66,7 @@ describe("task Gateway methods", () => {
         mainAgent: { name: "Test Assistant" },
       };
 
-      (callGateway as any).mockResolvedValueOnce({
+      (callGateway as unknown as any).mockResolvedValueOnce({
         ok: true,
         agentId: "test-agent-001",
         name: "Test Assistant",
@@ -73,9 +74,12 @@ describe("task Gateway methods", () => {
       });
 
       await taskHandlers["task.create"]({
+        req: {} as unknown as any,
         params,
+        client: null,
+        isWebchatConnect: () => false,
         respond: mockRespond,
-        context: {} as any,
+        context: {} as unknown as any,
       });
 
       expect(mockRespond.mock.calls[0][0]).toBe(true);
@@ -91,15 +95,18 @@ describe("task Gateway methods", () => {
         mainAgent: { name: "Test Assistant" },
       };
 
-      (callGateway as any).mockResolvedValueOnce({
+      (callGateway as unknown as any).mockResolvedValueOnce({
         ok: false,
         error: "Failed to create agent",
       });
 
       await taskHandlers["task.create"]({
+        req: {} as unknown as any,
         params,
+        client: null,
+        isWebchatConnect: () => false,
         respond: mockRespond,
-        context: {} as any,
+        context: {} as unknown as any,
       });
 
       expect(mockRespond.mock.calls[0][0]).toBe(false);
@@ -114,9 +121,12 @@ describe("task Gateway methods", () => {
       };
 
       await taskHandlers["task.destroy"]({
+        req: {} as unknown as any,
         params,
+        client: null,
+        isWebchatConnect: () => false,
         respond: mockRespond,
-        context: {} as any,
+        context: {} as unknown as any,
       });
 
       expect(mockRespond.mock.calls[0][0]).toBe(false);

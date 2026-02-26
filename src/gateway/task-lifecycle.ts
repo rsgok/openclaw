@@ -5,9 +5,9 @@
  * for task-based multi-agent sessions.
  */
 
-import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
-import { callGateway } from "../call.js";
-import { getTaskRegistry, queryTaskSessions } from "../server-methods/task.js";
+import { createInternalHookEvent, triggerInternalHook } from "../hooks/internal-hooks.js";
+import { callGateway } from "./call.js";
+import { getTaskRegistry, queryTaskSessions } from "./server-methods/task.js";
 
 const SCAN_INTERVAL_MS = 60_000; // 1 minute
 const DEFAULT_TTL_HOURS = 7 * 24; // 7 days
@@ -109,13 +109,13 @@ async function scanAndCleanupTasks(): Promise<{
 
         // Emit idle_timeout hook before cleanup
         if (reason === "idle") {
-          await triggerInternalHook(
-            createInternalHookEvent("task_idle_timeout", {
-              taskId,
-              idleMinutes: ttlSettings.idleTtlMinutes,
-              action: ttlSettings.onIdle || "delete",
-            }),
-          );
+          const mainSessionKey = `agent:${taskInfo.mainAgentId}:main`;
+          const idleTimeoutEvent = createInternalHookEvent("task", "idle_timeout", mainSessionKey, {
+            taskId,
+            idleMinutes: ttlSettings.idleTtlMinutes,
+            action: ttlSettings.onIdle || "delete",
+          });
+          await triggerInternalHook(idleTimeoutEvent);
         }
 
         // Cleanup task
@@ -156,17 +156,17 @@ async function cleanupTask(
     });
 
     // Emit task_destroyed hook
-    await triggerInternalHook(
-      createInternalHookEvent("task_destroyed", {
-        taskId,
-        reason: reason === "ttl" ? "ttl_expired" : "idle_timeout",
-        deletedAgents: {
-          main: 1,
-          subagents: taskInfo.subagentSessionKeys.length,
-        },
-        destroyedAt: Date.now(),
-      }),
-    );
+    const mainSessionKey = `agent:${taskInfo.mainAgentId}:main`;
+    const taskDestroyedEvent = createInternalHookEvent("task", "destroyed", mainSessionKey, {
+      taskId,
+      reason: reason === "ttl" ? "ttl_expired" : "idle_timeout",
+      deletedAgents: {
+        main: 1,
+        subagents: taskInfo.subagentSessionKeys.length,
+      },
+      destroyedAt: Date.now(),
+    });
+    await triggerInternalHook(taskDestroyedEvent);
   } catch (err) {
     console.error(`Failed to cleanup task ${taskId}:`, err);
     throw err;

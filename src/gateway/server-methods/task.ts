@@ -8,7 +8,9 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Value } from "@sinclair/typebox/value";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
+import { spawnSubagentDirect } from "../../agents/subagent-spawn.js";
 import { loadConfig } from "../../config/config.js";
 import { type SessionEntry } from "../../config/sessions.js";
 import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
@@ -18,16 +20,10 @@ import { callGateway } from "../call.js";
 import {
   ErrorCodes,
   errorShape,
-  formatValidationErrors,
-  validateTaskCreateParams,
-  validateTaskDestroyParams,
-  validateTaskSessionsParams,
+  TaskCreateParamsSchema,
+  TaskDestroyParamsSchema,
+  TaskSessionsParamsSchema,
   type TaskCreateParams,
-  type TaskCreateResult,
-  type TaskDestroyParams,
-  type TaskDestroyResult,
-  type TaskSessionsParams,
-  type TaskSessionsResult,
 } from "../protocol/index.js";
 import { loadCombinedSessionStoreForGateway } from "../session-utils.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -88,7 +84,7 @@ async function writeBootstrapFiles(params: {
   agentId: string;
   files: Record<string, string>;
 }): Promise<void> {
-  const workspaceDir = resolveAgentWorkspaceDir(cfg, params.agentId);
+  const workspaceDir = resolveAgentWorkspaceDir(loadConfig(), params.agentId);
 
   for (const [filename, content] of Object.entries(params.files)) {
     const filePath = path.join(workspaceDir, filename);
@@ -136,7 +132,10 @@ async function rollbackTaskCreation(params: {
 
     // Cleanup task workspace
     try {
-      const taskWorkspace = path.join(resolveAgentWorkspaceDir(cfg, "_tasks"), params.taskId);
+      const taskWorkspace = path.join(
+        resolveAgentWorkspaceDir(loadConfig(), "_tasks"),
+        params.taskId,
+      );
       await fs.rm(taskWorkspace, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
@@ -152,9 +151,6 @@ async function rollbackTaskCreation(params: {
   }
 }
 
-/**
- * Create predefined subagents for a task.
- */
 async function createPredefinedSubagents(params: {
   taskId: string;
   parentSessionKey: string;
@@ -167,8 +163,11 @@ async function createPredefinedSubagents(params: {
 
   try {
     const results = [];
+    console.log(`🔍 Creating ${params.subagents?.length || 0} subagents for task ${params.taskId}`);
 
     for (const subagent of params.subagents ?? []) {
+      console.log(`🔍 Creating subagent: ${subagent.role}`);
+
       // Resolve bootstrap files
       const bootstrapResult = await resolveBootstrapFiles({
         inline: subagent.bootstrapFiles,
@@ -176,28 +175,42 @@ async function createPredefinedSubagents(params: {
       });
 
       if (!bootstrapResult.ok) {
+        console.error(`❌ Bootstrap failed for ${subagent.role}: ${bootstrapResult.error}`);
         return { ok: false, error: bootstrapResult.error, sessionKeys: createdSessionKeys };
       }
 
-      // Spawn subagent via sessions_spawn
-      const spawnResult = await callGateway<{
-        status: string;
-        childSessionKey?: string;
-        runId?: string;
-        error?: string;
-      }>({
-        method: "agent",
-        params: {
-          message: `Initialize as ${subagent.role}. Your role is: ${subagent.role}`,
-          sessionKey: `agent:main:subagent:${randomUUID()}`,
-          extraSystemPrompt: bootstrapResult.files["AGENTS.md"] || "",
+      // Use spawnSubagentDirect to create subagent
+      const spawnResult = await spawnSubagentDirect(
+        {
+          task: `Initialize as ${subagent.role}. Your role is: ${subagent.role}`,
+          label: subagent.role,
+          predefinedRole: subagent.role,
+          bootstrapFiles: bootstrapResult.files,
+          taskId: params.taskId,
+          agentRole: subagent.role,
+          mode: "run", // Use "run" mode for predefined subagents
         },
-      });
+        {
+          agentSessionKey: params.parentSessionKey,
+          requesterAgentIdOverride: undefined,
+          agentChannel: undefined,
+          agentAccountId: undefined,
+          agentTo: undefined,
+          agentThreadId: undefined,
+          agentGroupId: undefined,
+          agentGroupChannel: undefined,
+          agentGroupSpace: undefined,
+        },
+      );
 
-      if (spawnResult.status !== "accepted" && spawnResult.status !== "ok") {
+      console.log(`🔍 Subagent spawn result:`, JSON.stringify(spawnResult, null, 2));
+
+      if (spawnResult.status !== "accepted") {
+        const errorMsg = spawnResult.error || `Failed to spawn subagent for role ${subagent.role}`;
+        console.error(`❌ Spawn failed: ${errorMsg}`);
         return {
           ok: false,
-          error: spawnResult.error || `Failed to spawn subagent for role ${subagent.role}`,
+          error: errorMsg,
           sessionKeys: createdSessionKeys,
         };
       }
@@ -206,7 +219,7 @@ async function createPredefinedSubagents(params: {
       if (sessionKey) {
         createdSessionKeys.push(sessionKey);
 
-        // Patch session with Task metadata
+        // Patch session with Task metadata (redundant but safe)
         await callGateway({
           method: "sessions.patch",
           params: {
@@ -223,11 +236,14 @@ async function createPredefinedSubagents(params: {
           sessionKey,
           ready: true,
         });
+        console.log(`✅ Subagent created: ${subagent.role} -> ${sessionKey}`);
       }
     }
 
+    console.log(`✅ All ${results.length} subagents created successfully`);
     return { ok: true, subagents: results };
   } catch (err) {
+    console.error(`❌ Subagents creation failed: ${String(err)}`);
     return {
       ok: false,
       error: String(err),
@@ -238,19 +254,19 @@ async function createPredefinedSubagents(params: {
 
 export const taskHandlers: GatewayRequestHandlers = {
   "task.create": async ({ params, respond }) => {
-    if (!validateTaskCreateParams(params)) {
+    console.log("🔍 task.create params:", JSON.stringify(params, null, 2));
+
+    if (!Value.Check(TaskCreateParamsSchema, params)) {
+      console.log("❌ Validation failed:", Value.Errors(TaskCreateParamsSchema, params));
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          `invalid task.create params: ${formatValidationErrors(validateTaskCreateParams.errors)}`,
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid task.create params"),
       );
       return;
     }
 
-    const p = params as TaskCreateParams;
+    const p = params;
     const taskId = p.taskId || randomUUID();
 
     // Check if task already exists
@@ -271,11 +287,18 @@ export const taskHandlers: GatewayRequestHandlers = {
     };
 
     try {
+      const results: {
+        main: { agentId: string; sessionKey: string };
+        subagents: Array<{ role: string; sessionKey: string; ready: boolean }>;
+      } = {
+        main: { agentId: "", sessionKey: "" },
+        subagents: [],
+      };
+
       // 1. Create main agent
       const mainAgentResult = await callGateway<{
         ok: boolean;
         agentId: string;
-        name: string;
         workspace: string;
       }>({
         method: "agents.create",
@@ -286,10 +309,17 @@ export const taskHandlers: GatewayRequestHandlers = {
       });
 
       if (!mainAgentResult.ok) {
-        throw new Error("Failed to create main agent");
+        throw new Error(`Failed to create main agent: ${JSON.stringify(mainAgentResult)}`);
       }
 
+      console.log("✅ Main agent created:", mainAgentResult);
+
       rollbackInfo.mainAgentId = mainAgentResult.agentId;
+
+      results.main = {
+        agentId: mainAgentResult.agentId,
+        sessionKey: `agent:${mainAgentResult.agentId}:main`,
+      };
 
       // 2. Inject main agent bootstrap files
       const mainBootstrapResult = await resolveBootstrapFiles({
@@ -322,7 +352,7 @@ export const taskHandlers: GatewayRequestHandlers = {
           taskId,
           agentRole: "main",
           agentType: "main",
-          label: p.mainAgent.label,
+          label: p.mainAgent.name,
         },
       });
 
@@ -348,34 +378,30 @@ export const taskHandlers: GatewayRequestHandlers = {
       });
 
       // 6. Emit task_created hook
-      await triggerInternalHook(
-        createInternalHookEvent("task_created", {
-          taskId,
-          mainAgentId: mainAgentResult.agentId,
-          subagents: subagentResult.subagents.map((s) => ({
-            role: s.role,
-            sessionKey: s.sessionKey,
-          })),
-          createdAt: Date.now(),
-          ttlHours,
-          idleTtlMinutes,
-        }),
-      );
+      const taskCreatedEvent = createInternalHookEvent("task", "created", mainSessionKey, {
+        taskId,
+        mainAgentId: mainAgentResult.agentId,
+        subagents: subagentResult.subagents.map((s) => ({
+          role: s.role,
+          sessionKey: s.sessionKey,
+        })),
+        createdAt: Date.now(),
+        ttlHours,
+        idleTtlMinutes,
+      });
+      await triggerInternalHook(taskCreatedEvent);
 
       // 7. Return success response
-      const result: TaskCreateResult = {
+      const result = {
         ok: true,
         taskId,
-        mainAgent: {
-          agentId: mainAgentResult.agentId,
-          sessionKey: mainSessionKey,
-          name: mainAgentResult.name,
-        },
-        predefinedSubagents: subagentResult.subagents,
         status: "ready",
-        ttl: {
-          hours: ttlHours,
-          idleMinutes: idleTtlMinutes,
+        agents: {
+          main: {
+            agentId: mainAgentResult.agentId,
+            sessionKey: mainSessionKey,
+          },
+          subagents: subagentResult.subagents,
         },
       };
 
@@ -400,19 +426,16 @@ export const taskHandlers: GatewayRequestHandlers = {
   },
 
   "task.destroy": async ({ params, respond }) => {
-    if (!validateTaskDestroyParams(params)) {
+    if (!Value.Check(TaskDestroyParamsSchema, params)) {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          `invalid task.destroy params: ${formatValidationErrors(validateTaskDestroyParams.errors)}`,
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid task.destroy params"),
       );
       return;
     }
 
-    const p = params as TaskDestroyParams;
+    const p = params;
     const taskInfo = taskRegistry.get(p.taskId);
 
     if (!taskInfo) {
@@ -431,7 +454,7 @@ export const taskHandlers: GatewayRequestHandlers = {
     try {
       // 1. Archive transcripts if requested
       if (p.archiveTranscripts) {
-        const allSessions = loadCombinedSessionStoreForGateway();
+        const { store: allSessions } = loadCombinedSessionStoreForGateway(loadConfig());
 
         for (const [key, entry] of Object.entries(allSessions)) {
           if (entry.origin?.taskId === p.taskId) {
@@ -474,7 +497,10 @@ export const taskHandlers: GatewayRequestHandlers = {
       // 4. Cleanup workspace
       if (p.deleteFiles) {
         try {
-          const taskWorkspace = path.join(resolveAgentWorkspaceDir(cfg, "_tasks"), p.taskId);
+          const taskWorkspace = path.join(
+            resolveAgentWorkspaceDir(loadConfig(), "_tasks"),
+            p.taskId,
+          );
           await fs.rm(taskWorkspace, { recursive: true, force: true });
         } catch (err) {
           errors.push(`Failed to cleanup workspace: ${String(err)}`);
@@ -485,23 +511,22 @@ export const taskHandlers: GatewayRequestHandlers = {
       taskRegistry.delete(p.taskId);
 
       // 6. Emit task_destroyed hook
-      await triggerInternalHook(
-        createInternalHookEvent("task_destroyed", {
-          taskId: p.taskId,
-          reason: "user_requested",
-          deletedAgents,
-          destroyedAt: Date.now(),
-          errors: errors.length > 0 ? errors : undefined,
-        }),
-      );
+      const mainSessionKey = `agent:${taskInfo.mainAgentId}:main`;
+      const taskDestroyedEvent = createInternalHookEvent("task", "destroyed", mainSessionKey, {
+        taskId: p.taskId,
+        reason: "user_requested",
+        deletedAgents,
+        destroyedAt: Date.now(),
+        errors: errors.length > 0 ? errors : undefined,
+      });
+      await triggerInternalHook(taskDestroyedEvent);
 
       // 7. Return result
-      const result: TaskDestroyResult = {
+      const result = {
         ok: true,
         taskId: p.taskId,
         deletedAgents,
         archivedSessions: archivedSessions.length,
-        errors: errors.length > 0 ? errors : undefined,
       };
 
       respond(true, result);
@@ -515,23 +540,20 @@ export const taskHandlers: GatewayRequestHandlers = {
   },
 
   "task.sessions": async ({ params, respond }) => {
-    if (!validateTaskSessionsParams(params)) {
+    if (!Value.Check(TaskSessionsParamsSchema, params)) {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          `invalid task.sessions params: ${formatValidationErrors(validateTaskSessionsParams.errors)}`,
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid task.sessions params"),
       );
       return;
     }
 
-    const p = params as TaskSessionsParams;
+    const p = params;
 
     try {
       // Load all sessions and filter by taskId
-      const allSessions = loadCombinedSessionStoreForGateway();
+      const { store: allSessions } = loadCombinedSessionStoreForGateway(loadConfig());
       const taskSessions: Array<{
         sessionKey: string;
         agentId: string;
@@ -564,12 +586,10 @@ export const taskHandlers: GatewayRequestHandlers = {
         }
       }
 
-      const result: TaskSessionsResult = {
+      const result = {
         ok: true,
         taskId: p.taskId,
         sessions: taskSessions,
-        totalCount: taskSessions.length,
-        activeCount: taskSessions.filter((s) => s.status === "active").length,
       };
 
       respond(true, result);
@@ -589,12 +609,12 @@ export const taskHandlers: GatewayRequestHandlers = {
 export async function queryTaskSessions(
   taskId: string,
 ): Promise<Array<{ sessionKey: string; entry: SessionEntry }>> {
-  const allSessions = loadCombinedSessionStoreForGateway(cfg);
+  const { store: allSessions } = loadCombinedSessionStoreForGateway(loadConfig());
   const results: Array<{ sessionKey: string; entry: SessionEntry }> = [];
 
   for (const [key, entry] of Object.entries(allSessions)) {
-    if ((entry as SessionEntry).origin?.taskId === taskId) {
-      results.push({ sessionKey: key, entry: entry as SessionEntry });
+    if (entry.origin?.taskId === taskId) {
+      results.push({ sessionKey: key, entry: entry });
     }
   }
 

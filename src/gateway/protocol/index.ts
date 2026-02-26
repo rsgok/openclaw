@@ -230,6 +230,18 @@ import {
   WizardStatusResultSchema,
   type WizardStep,
   WizardStepSchema,
+  type TaskCreateParams,
+  TaskCreateParamsSchema,
+  type TaskCreateResult,
+  TaskCreateResultSchema,
+  type TaskDestroyParams,
+  TaskDestroyParamsSchema,
+  type TaskDestroyResult,
+  TaskDestroyResultSchema,
+  type TaskSessionsParams,
+  TaskSessionsParamsSchema,
+  type TaskSessionsResult,
+  TaskSessionsResultSchema,
 } from "./schema.js";
 
 const ajv = new (AjvPkg as unknown as new (opts?: object) => import("ajv").default)({
@@ -514,6 +526,12 @@ export {
   PROTOCOL_VERSION,
   ErrorCodes,
   errorShape,
+  TaskCreateParamsSchema,
+  TaskCreateResultSchema,
+  TaskDestroyParamsSchema,
+  TaskDestroyResultSchema,
+  TaskSessionsParamsSchema,
+  TaskSessionsResultSchema,
 };
 
 export type {
@@ -618,4 +636,10 @@ export type {
   PollParams,
   UpdateRunParams,
   ChatInjectParams,
+  TaskCreateParams,
+  TaskCreateResult,
+  TaskDestroyParams,
+  TaskDestroyResult,
+  TaskSessionsParams,
+  TaskSessionsResult,
 };
